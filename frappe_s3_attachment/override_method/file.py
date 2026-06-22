@@ -123,9 +123,9 @@ class MyFile(File):
                 try:
                     # for plain text files
                     content = content.decode()
-                except UnicodeDecodeError as error:
-                    # for .png, .jpg, etc
-                    frappe.log_error(e, f"can't open file error = {error}")
+                except UnicodeDecodeError:
+                    # for binary files (.png, .jpg, .xlsx, etc)
+                    pass
 
         self.content = content
         return self.content
