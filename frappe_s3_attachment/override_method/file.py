@@ -89,6 +89,8 @@ class MyFile(File):
         self.validate_url()
         file_path = self.get_full_path()
 
+        content = None
+
         # read the file
         if PY2:
             with open(encode(file_path)) as f:
@@ -117,6 +119,8 @@ class MyFile(File):
                         content = f.read()
                 except Exception as error:
                     frappe.log_error(f"retry: can't open file error = {error}\nfile_path={file_path}\nsid={sid}")
+                    # fallback: direct S3 read (no HTTP session needed)
+                    content = self._read_from_s3_fallback()
         else:
             with io.open(encode(file_path), mode="rb") as f:
                 content = f.read()
@@ -127,8 +131,33 @@ class MyFile(File):
                     # for binary files (.png, .jpg, .xlsx, etc)
                     pass
 
+        if content is None:
+            frappe.throw(_("Could not read file: {0}").format(self.file_url))
+
         self.content = content
         return self.content
+
+    def _read_from_s3_fallback(self):
+        """Fallback to read file directly from S3 using boto3 when HTTP fails.
+
+        This is needed because background workers (RQ) have no browser session,
+        so HTTP requests to generate_file endpoint fail with 403.
+        """
+        from frappe_s3_attachment.controller import S3Operations
+        from urllib.parse import urlparse, parse_qs
+
+        url = self.file_url or self.get_full_path()
+        try:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            key = params.get("key", [None])[0]
+            if not key:
+                return None
+            s3_ops = S3Operations()
+            response = s3_ops.read_file_from_s3(key)
+            return response["Body"].read()
+        except Exception:
+            return None
 
     def unzip(self):
         """Unzip current file and replace it by its children"""
